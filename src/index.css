@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-900 text-white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Roboto', sans-serif;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-zinc-800/50 backdrop-blur-md border border-zinc-700/50 transition-all duration-300;
+  }
+  
+  .glass-card:hover {
+    @apply bg-zinc-800/60 border-zinc-600/50;
+  }
+  
+  .glass-sidebar {
+    @apply bg-slate-900/80 backdrop-blur-xl border-r border-zinc-800;
+  }
+  
+  .scanning-line {
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, 
+      transparent, 
+      rgba(34, 197, 94, 0.8), 
+      transparent
+    );
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+    animation: scan 2s ease-in-out infinite;
+  }
+  
+  .status-indicator {
+    @apply inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-semibold;
+  }
+  
+  .status-online {
+    @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/30;
+  }
+  
+  .status-simulation {
+    @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30;
+  }
+  
+  .status-offline {
+    @apply bg-red-500/20 text-red-400 border border-red-500/30;
+  }
+  
+  .fade-in {
+    animation: fadeIn 0.5s ease-in;
+  }
+  
+  .slide-in-right {
+    animation: slideInRight 0.4s ease-out;
+  }
+  
+  .pulse-critical {
+    animation: pulseCritical 2s ease-in-out infinite;
+  }
+  
+  .skeleton {
+    @apply bg-zinc-700/50 animate-pulse rounded;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@keyframes scan {
+  0%, 100% {
+    top: 0;
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulseCritical {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

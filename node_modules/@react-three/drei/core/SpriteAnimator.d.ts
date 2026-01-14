@@ -1,0 +1,38 @@
+import * as React from 'react';
+export type SpriteAnimatorProps = {
+    startFrame?: number;
+    endFrame?: number;
+    fps?: number;
+    frameName?: string;
+    textureDataURL?: string;
+    textureImageURL?: string;
+    loop?: boolean;
+    numberOfFrames?: number;
+    autoPlay?: boolean;
+    animationNames?: Array<string>;
+    onStart?: Function;
+    onEnd?: Function;
+    onLoopEnd?: Function;
+    onFrame?: Function;
+    play?: boolean;
+    pause?: boolean;
+    flipX?: boolean;
+    position?: Array<number>;
+    alphaTest?: number;
+    asSprite?: boolean;
+    offset?: number;
+    playBackwards?: boolean;
+    resetOnEnd?: boolean;
+    maxItems?: number;
+    instanceItems?: any[];
+    spriteDataset?: any;
+} & JSX.IntrinsicElements['group'];
+type SpriteAnimatorState = {
+    current: number | undefined;
+    offset: number | undefined;
+    hasEnded: boolean | undefined;
+    ref: React.MutableRefObject<any> | undefined | null | ((instance: any) => void);
+};
+export declare function useSpriteAnimator(): SpriteAnimatorState;
+export declare const SpriteAnimator: React.FC<SpriteAnimatorProps>;
+export {};
