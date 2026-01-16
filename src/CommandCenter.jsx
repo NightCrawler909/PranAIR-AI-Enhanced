@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import LiveLocationMap from './LiveLocationMap';
+import TacticalMapGrid from './TacticalMapGrid';
 import {
   LayoutDashboard,
   History,
@@ -1615,19 +1616,53 @@ function App() {
 
             </div>
 
-            {/* --- RIGHT COLUMN: AI ANALYSIS --- */}
+            {/* --- RIGHT COLUMN: TACTICAL MAPS (OPERATOR) OR AI ANALYSIS (DOCTOR) --- */}
             <div className={`flex flex-col h-full bg-[#0B1020] lg:pl-2 overflow-hidden ${activeRole === ROLES.DOCTOR ? 'lg:col-span-8' : 'lg:col-span-4'}`}>
-                <div className="flex items-center gap-2 text-purple-400 mb-4 flex-shrink-0">
-                    <Zap className="w-4 h-4" />
-                    <span className="text-[10px] font-bold tracking-[0.2em] uppercase">
-                        {activeRole === ROLES.DOCTOR ? 'DIAGNOSTIC DATA' : 'AI ANALYSIS'}
-                    </span>
-                </div>
+                
+                {/* OPERATOR VIEW: Tactical Map Grid */}
+                {activeRole === ROLES.OPERATOR && sosActive && patientLocation && (
+                    <TacticalMapGrid 
+                        realPatient={{
+                            id: 'PRIMARY_SOS',
+                            latitude: patientLocation.lat,
+                            longitude: patientLocation.lng,
+                            severity: 9, // Critical - primary SOS
+                            label: 'CRITICAL'
+                        }}
+                        drone={{
+                            id: 'DRONE_01',
+                            latitude: droneLocation.lat,
+                            longitude: droneLocation.lng,
+                            battery: telemetry?.battery || 85,
+                            altitude: telemetry?.altitude || 120,
+                            status: telemetry?.status || 'AIRBORNE'
+                        }}
+                    />
+                )}
+                
+                {/* OPERATOR VIEW: Awaiting SOS */}
+                {activeRole === ROLES.OPERATOR && !sosActive && (
+                    <div className="h-full flex items-center justify-center bg-[#111625] rounded-xl border border-zinc-800">
+                        <div className="text-center text-zinc-500">
+                            <Activity className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                            <p className="text-xs font-medium">Awaiting SOS Activation</p>
+                            <p className="text-[10px] opacity-40 mt-1">Tactical maps will appear once emergency is triggered</p>
+                        </div>
+                    </div>
+                )}
+                
+                {/* DOCTOR VIEW: AI Analysis Panel */}
+                {activeRole === ROLES.DOCTOR && (
+                    <>
+                        <div className="flex items-center gap-2 text-purple-400 mb-4 flex-shrink-0">
+                            <Zap className="w-4 h-4" />
+                            <span className="text-[10px] font-bold tracking-[0.2em] uppercase">DIAGNOSTIC DATA</span>
+                        </div>
 
-                <div className={`flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-4 pb-10 ${activeRole === ROLES.DOCTOR ? 'lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0' : ''}`}>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-4 pb-10 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
                     
                     {/* 1. DOCTOR VITALS PANEL (Always visible if active) */}
-                    {patientVitals && activeRole === ROLES.DOCTOR && (() => {
+                    {patientVitals && (() => {
                         const analysis = analyzeVitalsForDoctor(patientVitals);
                         return (
                             <div className="col-span-2 space-y-4 mb-4">
@@ -1880,6 +1915,8 @@ function App() {
                         );
                     })()}
                 </div>
+                    </>
+                )}
             </div>
 
             </div>

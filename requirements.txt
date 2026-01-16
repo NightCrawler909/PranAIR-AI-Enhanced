@@ -5,9 +5,19 @@ google-generativeai==0.3.2
 python-multipart==0.0.6
 Pillow==10.2.0
 
+# AI/ML Models
 torch
 transformers
 accelerate
 scipy
 faster-whisper
 numpy
+
+# Quantum Optimization Dependencies
+qiskit>=1.0.0
+qiskit-optimization>=0.6.0
+qiskit-algorithms>=0.3.0
+networkx>=3.0
+
+# Text-to-Speech
+edge-tts

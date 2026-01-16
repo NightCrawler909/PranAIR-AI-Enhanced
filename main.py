@@ -31,6 +31,15 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from PIL import Image
+import os
+import smtplib
+from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
 # ============================================================================
 # AI MODEL IMPORTS (with error handling)
@@ -51,6 +60,40 @@ try:
 except ImportError as e:
     logging.warning(f"Patient router not available: {e}")
     PATIENT_ROUTER_AVAILABLE = False
+
+# ============================================================================
+# IMPORT QUANTUM ROUTE OPTIMIZER
+# ============================================================================
+try:
+    from quantum_route_optimizer import (
+        solve_tsp_qubo,
+        RouteRequest,
+        Location,
+        calculate_route_metrics,
+        OPTIMIZER_AVAILABLE
+    )
+    QUANTUM_OPTIMIZER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Quantum optimizer not available: {e}")
+    QUANTUM_OPTIMIZER_AVAILABLE = False
+    OPTIMIZER_AVAILABLE = False
+
+# ============================================================================
+# IMPORT QUANTUM ROUTE OPTIMIZER
+# ============================================================================
+try:
+    from quantum_route_optimizer import (
+        solve_tsp_qubo,
+        RouteRequest,
+        Location,
+        calculate_route_metrics,
+        OPTIMIZER_AVAILABLE
+    )
+    QUANTUM_OPTIMIZER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Quantum optimizer not available: {e}")
+    QUANTUM_OPTIMIZER_AVAILABLE = False
+    OPTIMIZER_AVAILABLE = False
 
 
 # ============================================================================
@@ -98,9 +141,12 @@ else:
 DRONE_TELEMETRY = {
     'battery': 98.5,      # Percentage (0-100)
     'altitude': 120.0,    # Meters
-    'status': 'AIRBORNE', # AIRBORNE, LANDING, GROUNDED
+    'speed': 15.0,        # km/h
+    'status': 'AIRBORNE', # AIRBORNE, LANDING, GROUNDED, MISSION_PLANNED
     'lat': 28.61,         # Latitude
-    'lng': 77.20          # Longitude
+    'lng': 77.20,         # Longitude
+    'current_mission': [], # Optimized route waypoints
+    'total_missions_completed': 0
 }
 
 # Device configuration
@@ -468,6 +514,85 @@ def get_drone_status():
     return DRONE_TELEMETRY
 
 
+@app.post("/optimize-route")
+async def optimize_route(request: dict):
+    """
+    Quantum-inspired route optimization using QUBO formulation.
+    
+    Solves the Traveling Salesman Problem to find the most efficient
+    delivery route for multiple emergency locations.
+    
+    **Request Body**:
+    ```json
+    {
+      "current_location": {"lat": 28.61, "lng": 77.20, "id": "drone_base"},
+      "targets": [
+        {"lat": 28.62, "lng": 77.21, "id": "emergency_1"},
+        {"lat": 28.63, "lng": 77.22, "id": "emergency_2"}
+      ]
+    }
+    ```
+    
+    **Response**:
+    ```json
+    {
+      "status": "success",
+      "optimization_engine": "QUBO/Ising (Simulated)",
+      "optimized_route": [...],
+      "metrics": {...}
+    }
+    ```
+    """
+    if not QUANTUM_OPTIMIZER_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Quantum optimizer module not available. Install: pip install qiskit qiskit-optimization networkx"
+        )
+    
+    try:
+        import time
+        
+        # Parse request
+        current_loc = Location(**request["current_location"])
+        targets = [Location(**t) for t in request["targets"]]
+        
+        if len(targets) == 0:
+            return {
+                "status": "success",
+                "message": "No targets provided",
+                "optimized_route": [{"lat": current_loc.lat, "lng": current_loc.lng, "id": current_loc.id}]
+            }
+        
+        logger.info(f"🛸 Route optimization request: Start={current_loc.id}, Targets={len(targets)}")
+        
+        # Run optimization
+        start_time = time.time()
+        optimized_path = solve_tsp_qubo(current_loc, targets)
+        duration = time.time() - start_time
+        
+        # Calculate metrics
+        metrics = calculate_route_metrics(optimized_path)
+        
+        # Update telemetry
+        DRONE_TELEMETRY['current_mission'] = optimized_path
+        DRONE_TELEMETRY['status'] = 'MISSION_PLANNED'
+        
+        logger.info(f"✅ Route optimized in {duration:.3f}s, Distance: {metrics['total_distance_km']} km")
+        
+        return {
+            "status": "success",
+            "optimization_engine": "QUBO/Ising (Classical Simulator)" if OPTIMIZER_AVAILABLE else "Sequential Fallback",
+            "calculation_time_sec": round(duration, 3),
+            "optimized_route": optimized_path,
+            "waypoint_count": len(optimized_path),
+            "metrics": metrics
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Route optimization failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/")
 def root():
     """
@@ -496,9 +621,11 @@ def root():
         "mode": AI_MODE,
         "model_loaded": image_to_text is not None,
         "patient_router": PATIENT_ROUTER_AVAILABLE,
+        "quantum_optimizer": QUANTUM_OPTIMIZER_AVAILABLE and OPTIMIZER_AVAILABLE,
         "endpoints": {
             "dispatch": "POST /dispatch",
             "drone_status": "GET /drone-status",
+            "optimize_route": "POST /optimize-route",
             "patient_assistant": "POST /patient/voice-assistant",
             "patient_status": "GET /patient/status"
         }
@@ -537,6 +664,7 @@ if __name__ == "__main__":
     logger.info(f"🎯 Mode: {AI_MODE}")
     logger.info(f"🤖 Model Loaded: {image_to_text is not None}")
     logger.info(f"🏥 Patient Router: {PATIENT_ROUTER_AVAILABLE}")
+    logger.info(f"⚛️  Quantum Optimizer: {QUANTUM_OPTIMIZER_AVAILABLE and OPTIMIZER_AVAILABLE}")
     logger.info(f"🌐 Server: http://0.0.0.0:8000")
     logger.info(f"📚 Docs: http://0.0.0.0:8000/docs")
     logger.info("=" * 70)
