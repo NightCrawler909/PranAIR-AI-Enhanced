@@ -1,199 +1,220 @@
+"""
+PranAIR Medical Drone Backend
+==============================
+Main FastAPI application for medical drone project.
+
+Features:
+- Image dispatch and analysis (BLIP on CPU)
+- Drone telemetry simulation
+- Patient Voice Assistant (Gemini API - text only)
+
+Architecture:
+- CUDA disabled globally for stability
+- CPU-only inference for BLIP model
+- Simulation fallback if model fails to load
+- Proper async file handling to prevent UnicodeDecodeError
+"""
+
+# ============================================================================
+# 🔥 CUDA SAFETY - MUST BE FIRST (BEFORE ANY IMPORTS)
+# ============================================================================
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = ""  # HARD DISABLE ALL CUDA ACCESS
+# This prevents CUDA-related crashes and forces CPU inference
+# ============================================================================
+
 import logging
 import random
 import io
-import numpy as np
-from scipy.io import wavfile
-from scipy import signal
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
+from typing import Optional
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from PIL import Image
-import torch
-from transformers import AutoProcessor, BlipForConditionalGeneration, pipeline, AutoModelForCausalLM, AutoTokenizer
-from pydantic import BaseModel
-from faster_whisper import WhisperModel
 
-# Setup logging
+# ============================================================================
+# AI MODEL IMPORTS (with error handling)
+# ============================================================================
+try:
+    from transformers import pipeline, AutoProcessor, BlipForConditionalGeneration
+    TRANSFORMERS_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Transformers not available: {e}")
+    TRANSFORMERS_AVAILABLE = False
+
+# ============================================================================
+# IMPORT PATIENT VOICE ASSISTANT ROUTER
+# ============================================================================
+try:
+    from patient_gemini_assistant import router as patient_router
+    PATIENT_ROUTER_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Patient router not available: {e}")
+    PATIENT_ROUTER_AVAILABLE = False
+
+
+# ============================================================================
+# LOGGING SETUP
+# ============================================================================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(title="PranAIR Medical Drone Backend")
-
-# CORS configuration - allow all origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# ============================================================================
+# FASTAPI APP INITIALIZATION
+# ============================================================================
+app = FastAPI(
+    title="PranAIR Medical Drone Backend",
+    description="AI-powered medical drone dispatch and patient assistance system",
+    version="2.0.0"
 )
 
-# --- WHISPER SETUP ---
-whisper_model = None
-try:
-    logger.info("Loading Faster-Whisper Model: small.en")
-    w_device = "cuda" if torch.cuda.is_available() else "cpu"
-    w_compute_type = "float16" if w_device == "cuda" else "int8"
-    
-    whisper_model = WhisperModel("small.en", device=w_device, compute_type=w_compute_type)
-    logger.info(f"Whisper Model loaded on {w_device} ({w_compute_type})")
-except Exception as e:
-    logger.error(f"Failed to load Whisper: {e}")
+# ============================================================================
+# CORS MIDDLEWARE - ALLOW ALL ORIGINS
+# ============================================================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
+)
+logger.info("CORS enabled for all origins")
 
-# Force CPU device for stable inference
-device = -1
-device_name = "cpu"
-logger.info("Forcing CPU inference (stable mode)")
-logger.info("GPU disabled to avoid torch.load CVE issues")
+# ============================================================================
+# REGISTER PATIENT VOICE ASSISTANT ROUTER
+# ============================================================================
+if PATIENT_ROUTER_AVAILABLE:
+    app.include_router(patient_router)
+    logger.info("✅ Patient Voice Assistant router registered at /patient/*")
+else:
+    logger.warning("⚠️  Patient router not available - /patient/* endpoints disabled")
 
-# Load BLIP model at startup with CPU
-blip_model = None
-blip_processor = None
-image_to_text = None
-
-try:
-    logger.info("Loading BLIP model: Salesforce/blip-image-captioning-base")
-    logger.info("Using safetensors with CPU inference")
-    
-    # Step 1: Load processor explicitly
-    logger.info("Loading AutoProcessor...")
-    blip_processor = AutoProcessor.from_pretrained(
-        "Salesforce/blip-image-captioning-base",
-        use_fast=True
-    )
-    logger.info("Processor loaded successfully")
-    
-    # Step 2: Load model explicitly with safetensors on CPU
-    logger.info("Loading BlipForConditionalGeneration with safetensors...")
-    blip_model = BlipForConditionalGeneration.from_pretrained(
-        "Salesforce/blip-image-captioning-base",
-        torch_dtype=torch.float32,
-        use_safetensors=True
-    )
-    logger.info("Model loaded successfully on CPU")
-    
-    # Step 3: Create pipeline with loaded model and processor
-    logger.info("Creating pipeline on CPU...")
-    image_to_text = pipeline(
-        "image-to-text",
-        model=blip_model,
-        tokenizer=blip_processor.tokenizer,
-        image_processor=blip_processor.image_processor,
-        device=-1
-    )
-    
-    logger.info("BLIP pipeline initialized successfully on CPU")
-    logger.info("Model uses safetensors format (secure)")
-    
-except Exception as e:
-    logger.error(f"CRITICAL: Failed to load BLIP model: {e}")
-    logger.error(f"Error type: {type(e).__name__}")
-    import traceback
-    logger.error(f"Traceback: {traceback.format_exc()}")
-    logger.error("Model will use SIMULATION mode only")
-    image_to_text = None
-    blip_model = None
-    blip_processor = None
-
-# --- PHI-3 VOICE ASSISTANT SETUP ---
-voice_model = None
-voice_tokenizer = None
-
-try:
-    logger.info("Loading Phi-3 Mini 4K Instruct for Voice Assistant...")
-    model_id = "microsoft/Phi-3-mini-4k-instruct"
-    
-    # Check for GPU availability
-    voice_device = "cuda" if torch.cuda.is_available() else "cpu"
-    voice_dtype = torch.float16 if voice_device == "cuda" else torch.float32
-    
-    logger.info(f"Using device: {voice_device} ({voice_dtype}) for Voice Assistant")
-
-    voice_tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    voice_model = AutoModelForCausalLM.from_pretrained(
-        model_id, 
-        device_map=voice_device, 
-        torch_dtype=voice_dtype, 
-        trust_remote_code=True,
-        _attn_implementation="eager" # Use eager for better compatibility if flash-attn is missing
-    )
-    voice_model.eval() # Set to evaluation mode
-    
-    logger.info("Phi-3 Voice Assistant Model Loaded Successfully")
-
-except Exception as e:
-    logger.error(f"Failed to load Voice Assistant Model: {e}")
-    logger.warning("Voice Assistant will be unavailable (or use simulated responses)")
-    voice_model = None
-
-# Global telemetry state
+# ============================================================================
+# GLOBAL DRONE TELEMETRY STATE
+# ============================================================================
 DRONE_TELEMETRY = {
-    'battery': 98.5,
-    'altitude': 120.0,
-    'status': 'AIRBORNE',
-    'lat': 28.61,
-    'lng': 77.20
+    'battery': 98.5,      # Percentage (0-100)
+    'altitude': 120.0,    # Meters
+    'status': 'AIRBORNE', # AIRBORNE, LANDING, GROUNDED
+    'lat': 28.61,         # Latitude
+    'lng': 77.20          # Longitude
 }
 
+# Device configuration
+device_name = "CPU"
 
-def analyze_image_with_blip(image_bytes: bytes, source: str = "live_video_frame") -> dict:
+# ============================================================================
+# AI MODEL LOADING (BLIP IMAGE CAPTIONING - CPU ONLY)
+# ============================================================================
+image_to_text = None
+blip_model = None
+blip_processor = None
+AI_MODE = "SIMULATION"  # Default to simulation
+
+if TRANSFORMERS_AVAILABLE:
+    try:
+        logger.info("=" * 70)
+        logger.info("🤖 Loading BLIP Model: Salesforce/blip-image-captioning-base")
+        logger.info("📦 Using safetensors format for security")
+        logger.info("💻 Device: CPU (CUDA disabled)")
+        logger.info("=" * 70)
+        
+        # Step 1: Load processor
+        logger.info("Loading AutoProcessor...")
+        blip_processor = AutoProcessor.from_pretrained(
+            "Salesforce/blip-image-captioning-base",
+            use_fast=True
+        )
+        logger.info("✅ Processor loaded")
+        
+        # Step 2: Load model with safetensors on CPU
+        logger.info("Loading BlipForConditionalGeneration...")
+        blip_model = BlipForConditionalGeneration.from_pretrained(
+            "Salesforce/blip-image-captioning-base",
+            use_safetensors=True
+        )
+        # Explicitly move to CPU
+        blip_model = blip_model.to("cpu")
+        blip_model.eval()  # Set to evaluation mode
+        logger.info("✅ Model loaded on CPU")
+        
+        # Step 3: Create pipeline
+        logger.info("Creating inference pipeline...")
+        image_to_text = pipeline(
+            "image-to-text",
+            model=blip_model,
+            tokenizer=blip_processor.tokenizer,
+            image_processor=blip_processor.image_processor,
+            device=-1  # Force CPU (-1 means CPU in transformers)
+        )
+        
+        AI_MODE = "AI"
+        logger.info("=" * 70)
+        logger.info("✅ BLIP Model Ready")
+        logger.info(f"🎯 Mode: {AI_MODE}")
+        logger.info("=" * 70)
+        
+    except Exception as e:
+        logger.error("=" * 70)
+        logger.error(f"❌ CRITICAL: Failed to load BLIP model")
+        logger.error(f"Error: {e}")
+        logger.error(f"Type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
+        logger.error("🔄 Falling back to SIMULATION mode")
+        logger.error("=" * 70)
+        image_to_text = None
+        blip_model = None
+        blip_processor = None
+        AI_MODE = "SIMULATION"
+else:
+    logger.warning("⚠️  Transformers library not available - using SIMULATION mode")
+    AI_MODE = "SIMULATION"
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def get_simulation_data(source: str = "live_video_frame") -> dict:
     """
-    Analyzes image using local BLIP model via transformers pipeline.
+    Returns fallback simulation data when AI is unavailable.
     
     Args:
-        image_bytes: Raw image bytes from frontend
-        source: Source of the image (live_video_frame or uploaded_image)
+        source: Source of the request (live_video_frame or uploaded_image)
         
     Returns:
-        dict: Medical triage data with injury_type, severity_score, confidence, mode
+        dict: Simulated medical triage data
     """
-    try:
-        # Check if model loaded successfully
-        if image_to_text is None:
-            raise Exception("BLIP model not loaded")
-        
-        logger.info(f"Analyzing image: {len(image_bytes)} bytes, Source: {source}")
-        
-        # Convert bytes to PIL Image
-        image = Image.open(io.BytesIO(image_bytes))
-        logger.info(f"Image size: {image.size}, mode: {image.mode}")
-        
-        # Run inference with BLIP model
-        # For uploaded images, we ideally want to add context, but pipeline API varies.
-        # We will rely on higher confidence scoring for uploaded images.
-        result = image_to_text(image)
-        
-        # Extract caption from result
-        caption = ""
-        if isinstance(result, list) and len(result) > 0:
-            caption = result[0].get("generated_text", "")
-        
-        logger.info(f"BLIP Caption: {caption}")
-        
-        # Convert caption to medical triage
-        return caption_to_triage(caption, mode="AI", source=source)
-            
-    except Exception as e:
-        logger.error(f"AI analysis failed: {e}")
-        # Return simulation data with source info
-        sim_data = get_simulation_data()
-        if source == "uploaded_image":
-            sim_data["confidence"] = min(0.99, sim_data["confidence"] + 0.05)
-        return sim_data
+    # Random severity for variety in simulation
+    severity_options = [2, 5, 7, 8]
+    severity = random.choice(severity_options)
+    
+    injury_types = {
+        2: "Scene appears stable - no immediate danger",
+        5: "Minor injury detected - monitoring required",
+        7: "Moderate injury - person on ground",
+        8: "Severe injury detected - immediate attention needed"
+    }
+    
+    return {
+        "injury_type": injury_types.get(severity, "Unknown"),
+        "severity_score": severity,
+        "confidence": 0.92,
+        "mode": "SIMULATION",
+        "source": source
+    }
 
 
 def caption_to_triage(caption: str, mode: str = "AI", source: str = "live_video_frame") -> dict:
     """
     Converts BLIP caption into medical triage data.
     
-    Logic:
-    - If caption contains: injured, lying, fallen, ground -> severity 7
-    - Else -> severity 2
+    Triage Logic:
+    - If caption contains: injured, lying, fallen, ground → severity 7
+    - Otherwise → severity 2
     
     Args:
         caption: Image caption from BLIP model
@@ -201,295 +222,248 @@ def caption_to_triage(caption: str, mode: str = "AI", source: str = "live_video_
         source: live_video_frame or uploaded_image
         
     Returns:
-        dict: Triage data
+        dict: Triage data with injury_type, severity_score, confidence
     """
     caption_lower = caption.lower()
     
-    # Check for critical keywords
-    critical_keywords = ["injured", "lying", "fallen", "ground"]
+    # Critical keywords indicating potential injury
+    critical_keywords = ["injured", "lying", "fallen", "ground", "fall", "hurt"]
     
+    # Default to low severity
     severity_score = 2
     confidence = 0.70
     injury_type = "Scene appears stable"
-
+    
+    # Check for critical conditions
     if any(keyword in caption_lower for keyword in critical_keywords):
         injury_type = "Potential injury detected - person on ground"
         severity_score = 7
         confidence = 0.85
-        logger.info(f"Critical condition detected in caption: {caption}")
+        logger.info(f"⚠️  Critical condition detected in caption: '{caption}'")
+    else:
+        logger.info(f"✅ No critical keywords in caption: '{caption}'")
     
-    # Boost confidence for uploaded images (higher clarity assumption)
+    # Boost confidence for uploaded images (assumed higher quality)
     if source == "uploaded_image":
         confidence = min(0.99, confidence + 0.10)
-        logger.info("Boosting confidence for uploaded image source")
-
+        logger.info("📸 Boosting confidence for uploaded image")
+    
     return {
         "injury_type": injury_type,
         "severity_score": severity_score,
-        "confidence": confidence,
+        "confidence": round(confidence, 2),
         "mode": mode,
-        "source": source
+        "source": source,
+        "caption": caption  # Include original caption for debugging
     }
 
 
-def get_simulation_data() -> dict:
+def analyze_image_with_blip(image_bytes: bytes, source: str = "live_video_frame") -> dict:
     """
-    Returns fallback simulation data when AI is unavailable.
+    Analyzes image using BLIP model or simulation fallback.
     
+    Args:
+        image_bytes: Raw image bytes from upload
+        source: Source of the image (live_video_frame or uploaded_image)
+        
     Returns:
-        dict: Simulated medical triage data
+        dict: Medical triage data with injury analysis
     """
-    return {
-        "injury_type": "Detected Fracture and Bleeding (Simulated)",
-        "severity_score": 8,
-        "confidence": 0.95,
-        "mode": "SIMULATION"
-    }
-
-
-# --- VOICE ASSISTANT ENDPOINT ---
-
-@app.post("/patient/voice-assistant")
-async def voice_assistant_chat(
-    file: UploadFile = File(None),
-    user_text: str = Form(None),
-    blip_context: str = Form("Unknown context"),
-    vitals: str = Form("{}")
-):
-    """
-    Real-time voice assistant endpoint using Faster-Whisper + Phi-3.
-    Accepts EITHER 'file' (audio) OR 'user_text' (fallback).
-    """
-    import json
-    
-    # 1. Parse Vitals
     try:
-        vitals_dict = json.loads(vitals)
-    except:
-        vitals_dict = {"note": "Invalid vitals data"}
-
-    # 2. Get User Input (Audio -> Text or Direct Text)
-    input_text = ""
-    
-    # Check if audio file provided
-    if file:
-        if not whisper_model:
-            logger.warning("Whisper model not loaded, ignoring audio")
-        else:
-            try:
-                # Read Audio Bytes
-                audio_bytes = await file.read()
-                
-                # Check Duration/Size (Rough check on bytes before decoding)
-                if len(audio_bytes) < 1000: # < 1KB is definitely noise/silence
-                    logger.info("Audio too short/empty")
-                    return {"assistant_text": "Could not understand speech (too short)."}
-
-                # Decode WAV using SciPy (Optimized for WAV)
-                # Note: This assumes WAV format. If WebM (browser default), this fails.
-                use_direct_transcribe = False
-                try:
-                    sr, audio_data = wavfile.read(io.BytesIO(audio_bytes))
-                    
-                    # Convert to Float32 [-1, 1]
-                    if audio_data.dtype == np.int16:
-                        audio_data = audio_data.astype(np.float32) / 32768.0
-                    elif audio_data.dtype == np.int32:
-                        audio_data = audio_data.astype(np.float32) / 2147483648.0
-                    elif audio_data.dtype == np.uint8:
-                         audio_data = (audio_data.astype(np.float32) - 128) / 128.0
-
-                    # Convert Stereo to Mono
-                    if len(audio_data.shape) > 1:
-                        audio_data = np.mean(audio_data, axis=1)
-
-                    # Resample to 16kHz if needed
-                    if sr != 16000:
-                        num_samples = int(len(audio_data) * 16000 / sr)
-                        audio_data = signal.resample(audio_data, num_samples)
-                        sr = 16000
-
-                    # Check Duration (> 0.5s)
-                    duration = len(audio_data) / sr
-                    if duration < 0.5:
-                        logger.info(f"Rejected audio duration: {duration}s")
-                        return {"assistant_text": "Could not understand speech (too short)."}
-
-                    # Check RMS (Silence)
-                    rms = np.sqrt(np.mean(audio_data**2))
-                    logger.info(f"Audio RMS: {rms}")
-                    if rms < 0.005: # Threshold for silence
-                        return {"assistant_text": "Could not understand speech (silence)."}
-                        
-                    # Prepare for Whisper
-                    transcribe_input = audio_data
-
-                except Exception as wav_err:
-                     logger.warning(f"WAV read failed (likely WebM/Opus): {wav_err}. Falling back to direct Whisper decode.")
-                     use_direct_transcribe = True
-                     transcribe_input = io.BytesIO(audio_bytes)
-
-                # Transcribe with Faster-Whisper
-                # model.transcribe accepts numpy array OR file-like object
-                segments, info = whisper_model.transcribe(
-                    transcribe_input,
-                    beam_size=5,
-                    language="en",
-                    temperature=0,
-                    vad_filter=True
-                )
-                
-                # If direct transcribe, check duration from info
-                if use_direct_transcribe:
-                    if info.duration < 0.5:
-                         return {"assistant_text": "Could not understand speech (too short)."}
-                
-                transcribed_text = " ".join([segment.text for segment in segments]).strip()
-                logger.info(f"Whisper Transcription: '{transcribed_text}'")
-                
-                if not transcribed_text:
-                     return {"assistant_text": "Could not understand speech."}
-                
-                input_text = transcribed_text
-
-            except Exception as e:
-                logger.error(f"Transcription failed: {e}")
-                return {"assistant_text": "I heard you, but could not understand clearly. Please speak again."}
-
-    # Fallback/Merge with text input
-    if not input_text and user_text:
-        input_text = user_text
+        # Check if AI model is available
+        if image_to_text is None:
+            logger.warning("AI model not available - using simulation")
+            return get_simulation_data(source)
         
-    if not input_text:
-        # If we got here with no text from audio or string
-        return {"assistant_text": "I am listening."}
-
-
-    # 3. Generate AI Response (Phi-3)
-    if not voice_model or not voice_tokenizer:
-        return {"assistant_text": "I understand. Help is on the way. (Offline Mode)"}
-    
-    try:
-        # Construct Prompt
-        system_prompt = (
-            "You are a calm emergency medical voice assistant. "
-            "Rules:\n"
-            "- Do NOT diagnose medical conditions\n"
-            "- Do NOT estimate survival or death\n"
-            "- Do NOT speculate or assume unseen injuries\n"
-            "- Avoid complex medical terminology\n"
-            "- Always be calm and reassuring\n"
-            "- Encourage stillness and slow breathing\n"
-            "- If unsure, say: 'Help is on the way'\n"
-            "\n"
-            "Context:\n"
-            "- A medical drone is already dispatched\n"
-            "- Doctors are monitoring vitals remotely\n"
-            "- The patient may be injured or panicking\n"
-            "\n"
-            "Tone: Calm, Short sentences, Reassuring, Human-like but controlled"
-        )
+        logger.info(f"📊 Analyzing image: {len(image_bytes)} bytes from {source}")
         
-        vitals_str = ", ".join([f"{k}: {v}" for k, v in vitals_dict.items()])
+        # Convert bytes to PIL Image
+        image = Image.open(io.BytesIO(image_bytes))
         
-        full_conversation = (
-            f"<|system|>\n{system_prompt}\n"
-            f"Visual Context: {blip_context}\n"
-            f"Vitals: {vitals_str}<|end|>\n"
-            f"<|user|>\n{input_text}<|end|>\n"
-            f"<|assistant|>"
-        )
+        # Convert to RGB if necessary (BLIP expects RGB)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+            logger.info(f"Converted image from {image.mode} to RGB")
         
-        # Tokenize (Using same logic as before)
-        inputs = voice_tokenizer(full_conversation, return_tensors="pt").to(voice_model.device)
+        logger.info(f"Image size: {image.size}, mode: {image.mode}")
         
-        with torch.no_grad():
-            outputs = voice_model.generate(
-                **inputs, 
-                max_new_tokens=80,      
-                temperature=0.6,        
-                top_p=0.9,
-                do_sample=True,
-                repetition_penalty=1.1, 
-                use_cache=True          
-            )
-            
-        generated_text = voice_tokenizer.decode(outputs[0], skip_special_tokens=True)
-        # simplistic extraction
-        response_text = generated_text[len(voice_tokenizer.decode(inputs.input_ids[0], skip_special_tokens=True)):]
-        response_text = response_text.strip()
+        # Run BLIP inference
+        logger.info("🤖 Running BLIP inference...")
+        result = image_to_text(image)
         
-        if not response_text:
-             response_text = "I am here with you. Help is arriving shortly."
-
-        return {"assistant_text": response_text}
-
+        # Extract caption
+        caption = ""
+        if isinstance(result, list) and len(result) > 0:
+            caption = result[0].get("generated_text", "")
+        
+        if not caption:
+            logger.warning("Empty caption from BLIP - using simulation")
+            return get_simulation_data(source)
+        
+        logger.info(f"✅ BLIP Caption: '{caption}'")
+        
+        # Convert caption to triage
+        return caption_to_triage(caption, mode="AI", source=source)
+        
     except Exception as e:
-        logger.error(f"Voice Assistant Error: {e}")
-        return {"assistant_text": "I am having trouble connecting, but help is still on the way. Please stay calm."}
+        logger.error(f"❌ AI analysis failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Fallback to simulation
+        return get_simulation_data(source)
 
+
+# ============================================================================
+# API ENDPOINTS
+# ============================================================================
 
 @app.post("/dispatch")
-async def dispatch(file: UploadFile = File(...), source: str = Form("live_video_frame")):
+async def dispatch(
+    file: UploadFile = File(..., description="Image file (JPG, PNG, WebP)"),
+    source: str = Form("live_video_frame", description="Source: live_video_frame or uploaded_image")
+):
     """
-    Main dispatch endpoint - receives image from frontend.
+    Main dispatch endpoint - receives image for medical triage analysis.
     
-    Frontend sends FormData with key 'file'.
+    **Flow**:
+    1. Receives multipart/form-data with image file
+    2. Reads image bytes asynchronously (prevents UnicodeDecodeError)
+    3. Runs BLIP AI analysis or simulation fallback
+    4. Applies triage logic (keywords → severity score)
+    5. Returns analysis + current drone telemetry
     
-    Returns:
-        JSON with analysis and telemetry data
+    **Request**:
+    - file: UploadFile (binary image data)
+    - source: str (optional, default: "live_video_frame")
+    
+    **Response**:
+    ```json
+    {
+      "analysis": {
+        "injury_type": "Potential injury detected - person on ground",
+        "severity_score": 7,
+        "confidence": 0.85,
+        "mode": "AI",
+        "source": "live_video_frame",
+        "caption": "a person lying on the ground"
+      },
+      "telemetry": {
+        "battery": 98.5,
+        "altitude": 120.0,
+        "status": "AIRBORNE",
+        "lat": 28.61,
+        "lng": 77.20
+      }
+    }
+    ```
     """
-    logger.info(f"Dispatch request received: {file.filename}, Source: {source}")
+    logger.info("=" * 70)
+    logger.info(f"📡 Dispatch request received")
+    logger.info(f"   Filename: {file.filename}")
+    logger.info(f"   Content-Type: {file.content_type}")
+    logger.info(f"   Source: {source}")
+    logger.info("=" * 70)
     
     try:
-        # Read image bytes
+        # Explicitly read bytes asynchronously
+        # This prevents UnicodeDecodeError during validation
         image_bytes = await file.read()
         
-        # Validate image
+        # Validate image data
         if len(image_bytes) == 0:
+            logger.error("❌ Empty image file received")
             raise HTTPException(status_code=400, detail="Empty image file")
         
-        logger.info(f"Image size: {len(image_bytes)} bytes")
+        if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
+            logger.error(f"❌ Image too large: {len(image_bytes)} bytes")
+            raise HTTPException(status_code=400, detail="Image file too large (max 10MB)")
         
-        # Analyze image with BLIP
+        logger.info(f"✅ Image validated: {len(image_bytes)} bytes")
+        
+        # Analyze image
         analysis_result = analyze_image_with_blip(image_bytes, source)
         
         # Log result
         mode = analysis_result.get("mode", "UNKNOWN")
         severity = analysis_result.get("severity_score", 0)
-        logger.info(f"Analysis complete - Mode: {mode}, Severity: {severity}")
+        injury = analysis_result.get("injury_type", "Unknown")
         
-        # Return response
+        logger.info("=" * 70)
+        logger.info(f"📊 Analysis Complete")
+        logger.info(f"   Mode: {mode}")
+        logger.info(f"   Severity: {severity}/10")
+        logger.info(f"   Injury: {injury}")
+        logger.info(f"   Confidence: {analysis_result.get('confidence', 0)}")
+        logger.info("=" * 70)
+        
+        # Return combined response
         return {
-            "analysis": {
-                "injury_type": analysis_result["injury_type"],
-                "severity_score": analysis_result["severity_score"],
-                "confidence": analysis_result["confidence"],
-                "mode": analysis_result["mode"],
-                "source": analysis_result.get("source", "unknown")
-            },
-            "telemetry": DRONE_TELEMETRY
+            "analysis": analysis_result,
+            "telemetry": DRONE_TELEMETRY.copy()
         }
         
     except HTTPException:
         raise
+        
     except Exception as e:
-        logger.error(f"Dispatch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Dispatch failed: {e}")
+        import traceback
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+    
+    finally:
+        # Always close the file properly
+        await file.close()
+        logger.info("🔒 File closed")
 
 
 @app.get("/drone-status")
 def get_drone_status():
     """
     Returns current drone telemetry with simulated updates.
+    
+    **Simulation**:
+    - Battery drains by 0.05% per request
+    - Altitude varies by ±2 meters randomly
+    
+    **Response**:
+    ```json
+    {
+      "battery": 98.45,
+      "altitude": 121.3,
+      "status": "AIRBORNE",
+      "lat": 28.61,
+      "lng": 77.20
+    }
+    ```
     """
     global DRONE_TELEMETRY
     
-    # Simulate battery drain
-    DRONE_TELEMETRY['battery'] = round(max(0, DRONE_TELEMETRY['battery'] - 0.05), 2)
+    # Simulate battery drain (0.05% per call)
+    DRONE_TELEMETRY['battery'] = round(
+        max(0.0, DRONE_TELEMETRY['battery'] - 0.05),
+        2
+    )
     
-    # Simulate altitude variation
-    DRONE_TELEMETRY['altitude'] = round(120.0 + random.uniform(-2.0, 2.0), 2)
+    # Simulate altitude variation (±2 meters)
+    DRONE_TELEMETRY['altitude'] = round(
+        120.0 + random.uniform(-2.0, 2.0),
+        2
+    )
+    
+    # Update status based on battery
+    if DRONE_TELEMETRY['battery'] < 20:
+        DRONE_TELEMETRY['status'] = 'LOW_BATTERY'
+    elif DRONE_TELEMETRY['battery'] < 10:
+        DRONE_TELEMETRY['status'] = 'CRITICAL_BATTERY'
+    
+    logger.info(
+        f"📡 Telemetry: Battery={DRONE_TELEMETRY['battery']}%, "
+        f"Altitude={DRONE_TELEMETRY['altitude']}m"
+    )
     
     return DRONE_TELEMETRY
 
@@ -497,28 +471,79 @@ def get_drone_status():
 @app.get("/")
 def root():
     """
-    Health check endpoint
+    Health check and system info endpoint.
+    
+    **Response**:
+    ```json
+    {
+      "service": "PranAIR Medical Drone Backend",
+      "status": "operational",
+      "version": "2.0.0",
+      "ai_model": "Salesforce/blip-image-captioning-base",
+      "device": "CPU",
+      "mode": "AI",
+      "model_loaded": true,
+      "patient_router": true
+    }
+    ```
     """
     return {
         "service": "PranAIR Medical Drone Backend",
         "status": "operational",
         "version": "2.0.0",
         "ai_model": "Salesforce/blip-image-captioning-base",
-        "inference": "Local GPU/CPU",
-        "device": device_name,
+        "device": "CPU (CUDA disabled)",
+        "mode": AI_MODE,
         "model_loaded": image_to_text is not None,
-        "mode": "AI with Simulation Fallback"
+        "patient_router": PATIENT_ROUTER_AVAILABLE,
+        "endpoints": {
+            "dispatch": "POST /dispatch",
+            "drone_status": "GET /drone-status",
+            "patient_assistant": "POST /patient/voice-assistant",
+            "patient_status": "GET /patient/status"
+        }
     }
 
 
-if __name__ == "__main__":
-    logger.info("=" * 60)
-    logger.info("PranAIR Medical Drone Backend Starting")
-    logger.info("AI Model: Salesforce/blip-image-captioning-base")
-    logger.info("Inference: Local GPU/CPU via transformers.pipeline")
-    logger.info(f"Device: {device_name}")
-    logger.info("Fallback: Simulation Mode Enabled")
-    logger.info("Server: http://localhost:8000")
-    logger.info("=" * 60)
+@app.get("/health")
+def health_check():
+    """
+    Simple health check endpoint for monitoring.
     
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    **Response**:
+    ```json
+    {
+      "status": "healthy",
+      "ai_ready": true
+    }
+    ```
+    """
+    return {
+        "status": "healthy",
+        "ai_ready": AI_MODE == "AI",
+        "mode": AI_MODE
+    }
+
+
+# ============================================================================
+# SERVER STARTUP
+# ============================================================================
+if __name__ == "__main__":
+    logger.info("=" * 70)
+    logger.info("🚁 PranAIR Medical Drone Backend Starting")
+    logger.info("=" * 70)
+    logger.info(f"📦 AI Model: Salesforce/blip-image-captioning-base")
+    logger.info(f"💻 Device: CPU (CUDA disabled)")
+    logger.info(f"🎯 Mode: {AI_MODE}")
+    logger.info(f"🤖 Model Loaded: {image_to_text is not None}")
+    logger.info(f"🏥 Patient Router: {PATIENT_ROUTER_AVAILABLE}")
+    logger.info(f"🌐 Server: http://0.0.0.0:8000")
+    logger.info(f"📚 Docs: http://0.0.0.0:8000/docs")
+    logger.info("=" * 70)
+    
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info"
+    )

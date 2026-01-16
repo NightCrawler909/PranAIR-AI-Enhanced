@@ -369,16 +369,53 @@ const VoiceAssistant = ({ vitals, analysisResults }) => {
               }
           });
           
-          const aiText = res.data.assistant_text;
+          // Extract text and audio from new response format
+          const aiText = res.data.text || res.data.assistant_text || "Response received";
+          const audioBase64 = res.data.audio;
+          
           setAssistantResponse(aiText);
           setStatus('IDLE');
-          speakResponse(aiText);
+          
+          // Play Base64 audio if available, otherwise fallback to browser TTS
+          if (audioBase64) {
+              playBase64Audio(audioBase64);
+          } else {
+              speakResponse(aiText);
+          }
       } catch (err) {
           console.error("Voice Assistant Error:", err);
           const failText = "I am here with you. Help is on the way.";
           setAssistantResponse(failText);
           setStatus('IDLE');
           speakResponse(failText);
+      }
+  };
+  
+  const playBase64Audio = (base64Audio) => {
+      try {
+          setIsSpeaking(true);
+          
+          // Create audio element from Base64 string
+          const audioSrc = `data:audio/mp3;base64,${base64Audio}`;
+          const audio = new Audio(audioSrc);
+          
+          audio.onended = () => {
+              setIsSpeaking(false);
+          };
+          
+          audio.onerror = (err) => {
+              console.error('Audio playback error:', err);
+              setIsSpeaking(false);
+          };
+          
+          // Play the audio
+          audio.play().catch(err => {
+              console.error('Failed to play audio:', err);
+              setIsSpeaking(false);
+          });
+      } catch (err) {
+          console.error('Error processing audio:', err);
+          setIsSpeaking(false);
       }
   };
   
