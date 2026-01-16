@@ -964,14 +964,26 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Camera initialization - only when needed for Operator/Doctor views
   useEffect(() => {
+    // Only initialize camera if we're in Operator or Doctor view
+    if (activeRole === ROLES.PATIENT) {
+      return;
+    }
+
     const initCamera = async () => {
+      // Don't reinitialize if video already has a stream
+      if (videoRef.current?.srcObject) {
+        return;
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 1280, height: 720 },
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          setStreamActive(true);
         }
       } catch (error) {
         console.error('Camera access denied:', error);
@@ -981,12 +993,9 @@ function App() {
 
     initCamera();
 
-    return () => {
-      if (videoRef.current?.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
+    // Don't stop the camera when switching views - keep it running
+    // Only cleanup would happen when the entire component unmounts
+  }, [activeRole]); // Re-run when activeRole changes
 
   const handleTriage = async () => {
     if (isAnalyzing) return;
@@ -1223,10 +1232,13 @@ function App() {
                         value={activeRole}
                         onChange={(e) => setActiveRole(e.target.value)}
                         className="appearance-none bg-transparent pl-8 pr-8 py-1.5 text-[10px] md:text-xs font-bold tracking-wider text-zinc-300 focus:outline-none cursor-pointer hover:text-white transition-colors uppercase"
+                        style={{
+                            colorScheme: 'dark'
+                        }}
                     >
-                        <option value={ROLES.OPERATOR}>OPERATOR</option>
-                        <option value={ROLES.DOCTOR}>DOCTOR</option>
-                        <option value={ROLES.PATIENT}>PATIENT</option>
+                        <option value={ROLES.OPERATOR} className="bg-[#1a1a1a] text-white font-bold">OPERATOR</option>
+                        <option value={ROLES.DOCTOR} className="bg-[#1a1a1a] text-white font-bold">DOCTOR</option>
+                        <option value={ROLES.PATIENT} className="bg-[#1a1a1a] text-white font-bold">PATIENT</option>
                     </select>
                     <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
                         {activeRole === ROLES.OPERATOR && <User className="w-3.5 h-3.5 text-emerald-500" />}
