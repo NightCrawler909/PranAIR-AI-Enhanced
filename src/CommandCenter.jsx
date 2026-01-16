@@ -28,9 +28,11 @@ import {
   Navigation,
   Crosshair,
   ShieldAlert,
-  Info, // Added for Mobile Telemetry Toggle
-  Menu, // Added for Mobile Menu
-  X,    // Added for Mobile Menu
+  Info, 
+  Menu, 
+  X,    
+  Mic, // Added for Voice Assistant
+  Volume2, // Added for Voice Assistant
 } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -191,6 +193,256 @@ const TacticalMap = ({ patientLocation, droneLocation, showDrone, className }) =
     </div>
   );
 };
+
+
+// --- VOICE ASSISTANT COMPONENT (Revised with MediaRecorder) ---
+const VoiceAssistant = ({ vitals, analysisResults }) => {
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [assistantResponse, setAssistantResponse] = useState('');
+  const [error, setError] = useState(null);
+  const [status, setStatus] = useState('IDLE'); // IDLE, LISTENING, PROCESSING
+  
+  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const mediaStreamRef = useRef(null);
+  const isListeningRef = useRef(false); // To verify intended state in callbacks
+  
+  useEffect(() => {
+    // Initialize Speech Recognition
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false; // We manage restart manually
+      recognitionRef.current.interimResults = true;
+      recognitionRef.current.lang = 'en-US';
+      
+      recognitionRef.current.onresult = (event) => {
+        const currentTranscript = Array.from(event.results)
+          .map(result => result[0].transcript)
+          .join('');
+        setTranscript(currentTranscript);
+      };
+      
+      recognitionRef.current.onend = () => {
+        // If we are supposed to be listening, restart it (Auto-restart logic)
+        if (isListeningRef.current) {
+            try {
+                recognitionRef.current.start();
+            } catch (e) {
+                // Already started or unrelated error
+            }
+        }
+      };
+      
+      recognitionRef.current.onerror = (event) => {
+        console.error('Speech recognition error', event.error);
+        if (event.error === 'not-allowed') {
+            setError('Microphone permission denied.');
+            stopRecording();
+        }
+      };
+    } else {
+      setError('Voice not supported in this browser.');
+    }
+    
+    return () => {
+      stopRecording();
+    };
+  }, []);
+  
+  const startRecording = async () => {
+    try {
+       // 1. Get Audio Stream
+       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+       mediaStreamRef.current = stream;
+       
+       // 2. Setup MediaRecorder
+       mediaRecorderRef.current = new MediaRecorder(stream);
+       audioChunksRef.current = [];
+       
+       mediaRecorderRef.current.ondataavailable = (e) => {
+         if (e.data.size > 0) {
+             console.log("Audio chunk size:", e.data.size); // DEBUG CHECK
+             audioChunksRef.current.push(e.data);
+         }
+       };
+       
+       mediaRecorderRef.current.onstop = () => {
+           // This triggers after we explicitly call stop()
+           // We do nothing here, logic is in stopRecording
+       };
+
+       mediaRecorderRef.current.start(100); // 100ms slices
+       
+       // 3. Start Speech Recognition
+       if (recognitionRef.current) {
+           try {
+              recognitionRef.current.start();
+           } catch (e) { console.error("Recog start error:", e); }
+       }
+       
+       // 4. Update State
+       setIsListening(true);
+       isListeningRef.current = true;
+       setStatus('LISTENING');
+       setTranscript('');
+       setAssistantResponse('');
+       setError(null);
+       
+       // Interrupt AI speaking
+       window.speechSynthesis.cancel();
+       setIsSpeaking(false);
+
+    } catch (err) {
+       console.error("Mic Error:", err);
+       setError("Could not access microphone.");
+    }
+  };
+  
+  const stopRecording = () => {
+      if (!isListeningRef.current) return;
+      
+      setIsListening(false);
+      isListeningRef.current = false;
+      setStatus('PROCESSING');
+      
+      // Stop MediaRecorder
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+          
+          // --- VALIDATION LOGIC ---
+          // Wait briefly for final chunk
+          setTimeout(() => {
+              const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+              console.log("Final Audio Blob Size:", audioBlob.size);
+              
+              if (audioBlob.size < 3000) {
+                  // < 3KB -> Likely Silence (0.5s of audio is usually > 8KB at 16bit 16kHz mono)
+                  setError("Could not hear you (Audio too short/quiet).");
+                  setStatus('IDLE');
+              } else {
+                  // Valid Audio -> Send (Prioritize Audio, use Transcript as fallback)
+                  handleSendToBackend(transcript, audioBlob);
+              }
+              
+              // Clean up tracks
+              if (mediaStreamRef.current) {
+                  mediaStreamRef.current.getTracks().forEach(track => track.stop());
+              }
+          }, 200);
+      }
+      
+      // Stop Speech Recognition
+      if (recognitionRef.current) {
+          recognitionRef.current.stop();
+      }
+  };
+
+  const handleToggleListen = () => {
+    if (isListening) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+  
+  const handleSendToBackend = async (text, audioBlob) => {
+      setStatus('PROCESSING');
+      
+      // Prepare FormData
+      const formData = new FormData();
+      if (audioBlob) {
+        formData.append('file', audioBlob, 'voice_input.wav');
+      }
+      formData.append('user_text', text || "");
+      formData.append('blip_context', analysisResults ? `Detected ${analysisResults.primary_injury} with severity ${analysisResults.severity}` : "Unknown visual context");
+      formData.append('vitals', JSON.stringify(vitals || { note: "No vitals detected yet" }));
+      
+      try {
+          // Send as multipart/form-data
+          const res = await axios.post(`${API_BASE_URL}/patient/voice-assistant`, formData, {
+              headers: {
+                  'Content-Type': 'multipart/form-data'
+              }
+          });
+          
+          const aiText = res.data.assistant_text;
+          setAssistantResponse(aiText);
+          setStatus('IDLE');
+          speakResponse(aiText);
+      } catch (err) {
+          console.error("Voice Assistant Error:", err);
+          const failText = "I am here with you. Help is on the way.";
+          setAssistantResponse(failText);
+          setStatus('IDLE');
+          speakResponse(failText);
+      }
+  };
+  
+  const speakResponse = (text) => {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.rate = 0.95; 
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+  };
+  
+  return (
+      <div className="bg-[#111625] rounded-xl border border-zinc-800 p-4 relative overflow-hidden mt-4">
+          <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                  <div className={`p-1.5 rounded-lg ${isListening ? 'bg-red-500/20' : 'bg-zinc-800'}`}>
+                    <Mic className={`w-4 h-4 ${isListening ? 'text-red-500 animate-pulse' : 'text-zinc-400'}`} />
+                  </div>
+                  <h3 className="text-[10px] font-bold text-zinc-300 uppercase tracking-wider">Voice Assistant</h3>
+              </div>
+              {isSpeaking && <Volume2 className="w-4 h-4 text-emerald-500 animate-pulse" />}
+          </div>
+          
+          <div className="bg-black/20 rounded-lg p-3 min-h-[60px] mb-3 border border-white/5 transition-colors duration-300 relative">
+              {status === 'LISTENING' && transcript && (
+                   <p className="text-zinc-200 text-sm">"{transcript}"</p>
+              )}
+              {status === 'LISTENING' && !transcript && (
+                   <div className="flex items-center gap-2 text-zinc-500 text-xs italic">
+                       <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                       Listening...
+                   </div>
+              )}
+              {status === 'PROCESSING' && (
+                  <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold animate-pulse">
+                      Processing...
+                  </div>
+              )}
+              {status === 'IDLE' && assistantResponse && (
+                  <p className="text-emerald-400 text-sm font-medium">"{assistantResponse}"</p>
+              )}
+              {status === 'IDLE' && !assistantResponse && !error && (
+                  <p className="text-zinc-600 text-xs italic">Tap button to start speaking...</p>
+              )}
+              
+              {error && <p className="text-red-400 text-[10px] mt-1">{error}</p>}
+          </div>
+          
+          <button
+            onClick={handleToggleListen}
+            className={`w-full py-3 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${
+                isListening 
+                ? 'bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)]' 
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+            }`}
+          >
+              {isListening ? 'STOP & SEND' : 'TALK TO ASSISTANT'}
+          </button>
+      </div>
+  );
+};
+
 
 
 // Hospital Preparation Steps Generator
@@ -1125,6 +1377,9 @@ function App() {
                                    </li>
                                </ul>
                            </div>
+
+                           {/* VOICE ASSISTANT */}
+                           <VoiceAssistant vitals={patientVitals} analysisResults={analysisResults} />
 
                            {/* Upload Button */}
                            {renderImageUploadSection()}

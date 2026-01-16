@@ -2,12 +2,17 @@ import os
 import logging
 import random
 import io
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+import numpy as np
+from scipy.io import wavfile
+from scipy import signal
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from PIL import Image
 import torch
-from transformers import AutoProcessor, BlipForConditionalGeneration, pipeline
+from transformers import AutoProcessor, BlipForConditionalGeneration, pipeline, AutoModelForCausalLM, AutoTokenizer
+from pydantic import BaseModel
+from faster_whisper import WhisperModel
 
 # Setup logging
 logging.basicConfig(
@@ -27,6 +32,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- WHISPER SETUP ---
+whisper_model = None
+try:
+    logger.info("Loading Faster-Whisper Model: small.en")
+    w_device = "cuda" if torch.cuda.is_available() else "cpu"
+    w_compute_type = "float16" if w_device == "cuda" else "int8"
+    
+    whisper_model = WhisperModel("small.en", device=w_device, compute_type=w_compute_type)
+    logger.info(f"Whisper Model loaded on {w_device} ({w_compute_type})")
+except Exception as e:
+    logger.error(f"Failed to load Whisper: {e}")
 
 # Force CPU device for stable inference
 device = -1
@@ -82,6 +99,37 @@ except Exception as e:
     image_to_text = None
     blip_model = None
     blip_processor = None
+
+# --- PHI-3 VOICE ASSISTANT SETUP ---
+voice_model = None
+voice_tokenizer = None
+
+try:
+    logger.info("Loading Phi-3 Mini 4K Instruct for Voice Assistant...")
+    model_id = "microsoft/Phi-3-mini-4k-instruct"
+    
+    # Check for GPU availability
+    voice_device = "cuda" if torch.cuda.is_available() else "cpu"
+    voice_dtype = torch.float16 if voice_device == "cuda" else torch.float32
+    
+    logger.info(f"Using device: {voice_device} ({voice_dtype}) for Voice Assistant")
+
+    voice_tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    voice_model = AutoModelForCausalLM.from_pretrained(
+        model_id, 
+        device_map=voice_device, 
+        torch_dtype=voice_dtype, 
+        trust_remote_code=True,
+        _attn_implementation="eager" # Use eager for better compatibility if flash-attn is missing
+    )
+    voice_model.eval() # Set to evaluation mode
+    
+    logger.info("Phi-3 Voice Assistant Model Loaded Successfully")
+
+except Exception as e:
+    logger.error(f"Failed to load Voice Assistant Model: {e}")
+    logger.warning("Voice Assistant will be unavailable (or use simulated responses)")
+    voice_model = None
 
 # Global telemetry state
 DRONE_TELEMETRY = {
@@ -197,6 +245,188 @@ def get_simulation_data() -> dict:
         "confidence": 0.95,
         "mode": "SIMULATION"
     }
+
+
+# --- VOICE ASSISTANT ENDPOINT ---
+
+@app.post("/patient/voice-assistant")
+async def voice_assistant_chat(
+    file: UploadFile = File(None),
+    user_text: str = Form(None),
+    blip_context: str = Form("Unknown context"),
+    vitals: str = Form("{}")
+):
+    """
+    Real-time voice assistant endpoint using Faster-Whisper + Phi-3.
+    Accepts EITHER 'file' (audio) OR 'user_text' (fallback).
+    """
+    import json
+    
+    # 1. Parse Vitals
+    try:
+        vitals_dict = json.loads(vitals)
+    except:
+        vitals_dict = {"note": "Invalid vitals data"}
+
+    # 2. Get User Input (Audio -> Text or Direct Text)
+    input_text = ""
+    
+    # Check if audio file provided
+    if file:
+        if not whisper_model:
+            logger.warning("Whisper model not loaded, ignoring audio")
+        else:
+            try:
+                # Read Audio Bytes
+                audio_bytes = await file.read()
+                
+                # Check Duration/Size (Rough check on bytes before decoding)
+                if len(audio_bytes) < 1000: # < 1KB is definitely noise/silence
+                    logger.info("Audio too short/empty")
+                    return {"assistant_text": "Could not understand speech (too short)."}
+
+                # Decode WAV using SciPy (Optimized for WAV)
+                # Note: This assumes WAV format. If WebM (browser default), this fails.
+                use_direct_transcribe = False
+                try:
+                    sr, audio_data = wavfile.read(io.BytesIO(audio_bytes))
+                    
+                    # Convert to Float32 [-1, 1]
+                    if audio_data.dtype == np.int16:
+                        audio_data = audio_data.astype(np.float32) / 32768.0
+                    elif audio_data.dtype == np.int32:
+                        audio_data = audio_data.astype(np.float32) / 2147483648.0
+                    elif audio_data.dtype == np.uint8:
+                         audio_data = (audio_data.astype(np.float32) - 128) / 128.0
+
+                    # Convert Stereo to Mono
+                    if len(audio_data.shape) > 1:
+                        audio_data = np.mean(audio_data, axis=1)
+
+                    # Resample to 16kHz if needed
+                    if sr != 16000:
+                        num_samples = int(len(audio_data) * 16000 / sr)
+                        audio_data = signal.resample(audio_data, num_samples)
+                        sr = 16000
+
+                    # Check Duration (> 0.5s)
+                    duration = len(audio_data) / sr
+                    if duration < 0.5:
+                        logger.info(f"Rejected audio duration: {duration}s")
+                        return {"assistant_text": "Could not understand speech (too short)."}
+
+                    # Check RMS (Silence)
+                    rms = np.sqrt(np.mean(audio_data**2))
+                    logger.info(f"Audio RMS: {rms}")
+                    if rms < 0.005: # Threshold for silence
+                        return {"assistant_text": "Could not understand speech (silence)."}
+                        
+                    # Prepare for Whisper
+                    transcribe_input = audio_data
+
+                except Exception as wav_err:
+                     logger.warning(f"WAV read failed (likely WebM/Opus): {wav_err}. Falling back to direct Whisper decode.")
+                     use_direct_transcribe = True
+                     transcribe_input = io.BytesIO(audio_bytes)
+
+                # Transcribe with Faster-Whisper
+                # model.transcribe accepts numpy array OR file-like object
+                segments, info = whisper_model.transcribe(
+                    transcribe_input,
+                    beam_size=5,
+                    language="en",
+                    temperature=0,
+                    vad_filter=True
+                )
+                
+                # If direct transcribe, check duration from info
+                if use_direct_transcribe:
+                    if info.duration < 0.5:
+                         return {"assistant_text": "Could not understand speech (too short)."}
+                
+                transcribed_text = " ".join([segment.text for segment in segments]).strip()
+                logger.info(f"Whisper Transcription: '{transcribed_text}'")
+                
+                if not transcribed_text:
+                     return {"assistant_text": "Could not understand speech."}
+                
+                input_text = transcribed_text
+
+            except Exception as e:
+                logger.error(f"Transcription failed: {e}")
+                return {"assistant_text": "I heard you, but could not understand clearly. Please speak again."}
+
+    # Fallback/Merge with text input
+    if not input_text and user_text:
+        input_text = user_text
+        
+    if not input_text:
+        # If we got here with no text from audio or string
+        return {"assistant_text": "I am listening."}
+
+
+    # 3. Generate AI Response (Phi-3)
+    if not voice_model or not voice_tokenizer:
+        return {"assistant_text": "I understand. Help is on the way. (Offline Mode)"}
+    
+    try:
+        # Construct Prompt
+        system_prompt = (
+            "You are a calm emergency medical voice assistant. "
+            "Rules:\n"
+            "- Do NOT diagnose medical conditions\n"
+            "- Do NOT estimate survival or death\n"
+            "- Do NOT speculate or assume unseen injuries\n"
+            "- Avoid complex medical terminology\n"
+            "- Always be calm and reassuring\n"
+            "- Encourage stillness and slow breathing\n"
+            "- If unsure, say: 'Help is on the way'\n"
+            "\n"
+            "Context:\n"
+            "- A medical drone is already dispatched\n"
+            "- Doctors are monitoring vitals remotely\n"
+            "- The patient may be injured or panicking\n"
+            "\n"
+            "Tone: Calm, Short sentences, Reassuring, Human-like but controlled"
+        )
+        
+        vitals_str = ", ".join([f"{k}: {v}" for k, v in vitals_dict.items()])
+        
+        full_conversation = (
+            f"<|system|>\n{system_prompt}\n"
+            f"Visual Context: {blip_context}\n"
+            f"Vitals: {vitals_str}<|end|>\n"
+            f"<|user|>\n{input_text}<|end|>\n"
+            f"<|assistant|>"
+        )
+        
+        # Tokenize (Using same logic as before)
+        inputs = voice_tokenizer(full_conversation, return_tensors="pt").to(voice_model.device)
+        
+        with torch.no_grad():
+            outputs = voice_model.generate(
+                **inputs, 
+                max_new_tokens=80,      
+                temperature=0.6,        
+                top_p=0.9,
+                do_sample=True,
+                repetition_penalty=1.1, 
+                use_cache=True          
+            )
+            
+        generated_text = voice_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # simplistic extraction
+        response_text = generated_text[len(voice_tokenizer.decode(inputs.input_ids[0], skip_special_tokens=True)):]
+        response_text = response_text.strip()
+        
+        if not response_text:
+             response_text = "I am here with you. Help is arriving shortly."
+
+        return {"assistant_text": response_text}
+
+    except Exception as e:
+        logger.error(f"Voice Assistant Error: {e}")
+        return {"assistant_text": "I am having trouble connecting, but help is still on the way. Please stay calm."}
 
 
 @app.post("/dispatch")
