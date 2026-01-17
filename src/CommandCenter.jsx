@@ -34,9 +34,12 @@ import {
   X,    
   Mic, // Added for Voice Assistant
   Volume2, // Added for Voice Assistant
+  Gauge, // Added for Motor Control
+  Power, // Added for Motor Control
 } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:8000';
+const MOTOR_API_URL = 'http://localhost:8001';
 
 const ROLES = {
   OPERATOR: 'OPERATOR',
@@ -782,6 +785,10 @@ function App() {
   const [activeRole, setActiveRole] = useState(ROLES.OPERATOR); // Demo Role State
   const [showMobileInfo, setShowMobileInfo] = useState(false); // UI State for Mobile Telemetry
 
+  // --- MOTOR CONTROL STATE ---
+  const [motorStatus, setMotorStatus] = useState('stopped');
+  const [motorLoading, setMotorLoading] = useState(false);
+
   // --- SOS & MAP STATE ---
   const [sosActive, setSosActive] = useState(false);
   const [sosState, setSosState] = useState('IDLE'); // IDLE, REQUESTING, ACTIVE
@@ -791,6 +798,21 @@ function App() {
   
   // --- REAL-TIME VITALS (DRONE LINK) ---
   const patientVitals = usePatientVitals(sosActive);
+
+  // --- MOTOR CONTROL HANDLERS ---
+  const handleMotorControl = async (speed) => {
+    setMotorLoading(true);
+    try {
+      const response = await axios.get(`${MOTOR_API_URL}/${speed}`);
+      setMotorStatus(speed);
+      console.log('Motor control response:', response.data);
+    } catch (error) {
+      console.error('Motor control error:', error);
+      alert(`Failed to control motors: ${error.message}\nMake sure drone_controls.py is running on port 8001`);
+    } finally {
+      setMotorLoading(false);
+    }
+  };
 
   // --- SOS HANDLER ---
   const handleSOS = () => {
@@ -1534,6 +1556,88 @@ function App() {
                                     <span className="block text-zinc-600 text-[8px]">LNG</span>
                                     {coordinates.longitude.toFixed(5)}
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Motor Control Section */}
+                    <div className="mt-4 border-t border-white/5 pt-4">
+                        <div className="flex items-center gap-2 text-purple-500/50 mb-3">
+                            <Gauge className="w-4 h-4" />
+                            <span className="text-[10px] font-bold tracking-[0.2em] uppercase">Motor Control</span>
+                        </div>
+                        
+                        <div className="space-y-2">
+                            {/* Current Status */}
+                            <div className="bg-[#111625] border border-white/5 p-3 rounded-xl">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-zinc-500 text-[9px] font-bold uppercase">Current Speed</span>
+                                    <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
+                                        motorStatus === 'stopped' ? 'bg-zinc-800 text-zinc-400' :
+                                        motorStatus === 'slow' ? 'bg-blue-900/50 text-blue-400' :
+                                        motorStatus === 'medium' ? 'bg-yellow-900/50 text-yellow-400' :
+                                        motorStatus === 'fast' ? 'bg-orange-900/50 text-orange-400' :
+                                        motorStatus === 'max' ? 'bg-red-900/50 text-red-400' :
+                                        'bg-zinc-800 text-zinc-400'
+                                    }`}>
+                                        {motorStatus.toUpperCase()}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Control Buttons Grid */}
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    onClick={() => handleMotorControl('stop')}
+                                    disabled={motorLoading}
+                                    className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed border border-zinc-700 rounded-lg p-3 transition-all hover:scale-[1.02] active:scale-95 group"
+                                >
+                                    <Power className="w-4 h-4 text-zinc-400 group-hover:text-white mx-auto mb-1" />
+                                    <span className="text-[9px] font-bold text-zinc-400 group-hover:text-white uppercase block">Stop</span>
+                                </button>
+
+                                <button
+                                    onClick={() => handleMotorControl('slow')}
+                                    disabled={motorLoading}
+                                    className="bg-blue-900/30 hover:bg-blue-900/50 disabled:opacity-50 disabled:cursor-not-allowed border border-blue-700/50 rounded-lg p-3 transition-all hover:scale-[1.02] active:scale-95 group"
+                                >
+                                    <Gauge className="w-4 h-4 text-blue-400 group-hover:text-blue-300 mx-auto mb-1" />
+                                    <span className="text-[9px] font-bold text-blue-400 group-hover:text-blue-300 uppercase block">Slow</span>
+                                </button>
+
+                                <button
+                                    onClick={() => handleMotorControl('medium')}
+                                    disabled={motorLoading}
+                                    className="bg-yellow-900/30 hover:bg-yellow-900/50 disabled:opacity-50 disabled:cursor-not-allowed border border-yellow-700/50 rounded-lg p-3 transition-all hover:scale-[1.02] active:scale-95 group"
+                                >
+                                    <Gauge className="w-4 h-4 text-yellow-400 group-hover:text-yellow-300 mx-auto mb-1" />
+                                    <span className="text-[9px] font-bold text-yellow-400 group-hover:text-yellow-300 uppercase block">Medium</span>
+                                </button>
+
+                                <button
+                                    onClick={() => handleMotorControl('fast')}
+                                    disabled={motorLoading}
+                                    className="bg-orange-900/30 hover:bg-orange-900/50 disabled:opacity-50 disabled:cursor-not-allowed border border-orange-700/50 rounded-lg p-3 transition-all hover:scale-[1.02] active:scale-95 group"
+                                >
+                                    <Gauge className="w-4 h-4 text-orange-400 group-hover:text-orange-300 mx-auto mb-1" />
+                                    <span className="text-[9px] font-bold text-orange-400 group-hover:text-orange-300 uppercase block">Fast</span>
+                                </button>
+
+                                <button
+                                    onClick={() => handleMotorControl('max')}
+                                    disabled={motorLoading}
+                                    className="bg-red-900/30 hover:bg-red-900/50 disabled:opacity-50 disabled:cursor-not-allowed border border-red-700/50 rounded-lg p-3 transition-all hover:scale-[1.02] active:scale-95 col-span-2 group"
+                                >
+                                    <Zap className="w-4 h-4 text-red-400 group-hover:text-red-300 mx-auto mb-1" />
+                                    <span className="text-[9px] font-bold text-red-400 group-hover:text-red-300 uppercase block">Maximum</span>
+                                </button>
+                            </div>
+
+                            {/* Warning Text */}
+                            <div className="bg-red-900/10 border border-red-900/30 rounded-lg p-2">
+                                <p className="text-[8px] text-red-400/70 text-center leading-relaxed">
+                                    ⚠️ Motor controls interface with physical hardware. Use with caution.
+                                </p>
                             </div>
                         </div>
                     </div>
