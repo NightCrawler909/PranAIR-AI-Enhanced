@@ -228,39 +228,42 @@ def get_simulation_data(source: str = "live_video_frame") -> dict:
     """
     Returns fallback simulation data when AI is unavailable.
     
+    **DETERMINISTIC**: Always returns severity 5 (moderate/unknown)
+    No random values to ensure consistency.
+    
     Args:
         source: Source of the request (live_video_frame or uploaded_image)
         
     Returns:
         dict: Simulated medical triage data
     """
-    # Random severity for variety in simulation
-    severity_options = [2, 5, 7, 8]
-    severity = random.choice(severity_options)
-    
-    injury_types = {
-        2: "Scene appears stable - no immediate danger",
-        5: "Minor injury detected - monitoring required",
-        7: "Moderate injury - person on ground",
-        8: "Severe injury detected - immediate attention needed"
-    }
-    
+    # DETERMINISTIC: Always return moderate severity when in simulation mode
     return {
-        "injury_type": injury_types.get(severity, "Unknown"),
-        "severity_score": severity,
-        "confidence": 0.92,
+        "injury_type": "Unable to analyze - AI model unavailable",
+        "severity_score": 5,
+        "confidence": 0.50,
         "mode": "SIMULATION",
-        "source": source
+        "source": source,
+        "caption": "[SIMULATION MODE - No AI analysis available]"
     }
 
 
 def caption_to_triage(caption: str, mode: str = "AI", source: str = "live_video_frame") -> dict:
     """
-    Converts BLIP caption into medical triage data.
+    Converts BLIP caption into medical triage data using RULE-BASED DETERMINISTIC LOGIC.
     
-    Triage Logic:
-    - If caption contains: injured, lying, fallen, ground → severity 7
-    - Otherwise → severity 2
+    **DETERMINISTIC**: Same caption always returns same severity (no random values).
+    
+    Triage Severity Scale (1-9):
+    - 9: CRITICAL - Unconscious, severe bleeding, cardiac arrest
+    - 8: SEVERE - Person on ground, blood visible, major trauma
+    - 7: HIGH - Lying down, fallen, potential fracture
+    - 6: MODERATE-HIGH - Person injured but conscious
+    - 5: MODERATE - Minor injury, sitting/standing
+    - 4: LOW-MODERATE - Person in distress but mobile
+    - 3: LOW - Person appears uncomfortable
+    - 2: MINIMAL - Person appears stable
+    - 1: NONE - No person or no visible injury
     
     Args:
         caption: Image caption from BLIP model
@@ -272,24 +275,74 @@ def caption_to_triage(caption: str, mode: str = "AI", source: str = "live_video_
     """
     caption_lower = caption.lower()
     
-    # Critical keywords indicating potential injury
-    critical_keywords = ["injured", "lying", "fallen", "ground", "fall", "hurt"]
+    # CRITICAL keywords (severity 8-9)
+    critical_keywords = ["unconscious", "bleeding", "blood", "cardiac", "not breathing", "seizure"]
     
-    # Default to low severity
-    severity_score = 2
+    # SEVERE keywords (severity 7-8)
+    severe_keywords = ["lying", "ground", "fallen", "fall", "collapsed", "lying on", "laying on"]
+    
+    # MODERATE-HIGH keywords (severity 6)
+    moderate_high_keywords = ["injured", "hurt", "wound", "injury", "trauma", "pain"]
+    
+    # MODERATE keywords (severity 5)
+    moderate_keywords = ["sitting", "minor", "bruise", "cut", "scrape"]
+    
+    # LOW keywords (severity 3-4)
+    low_keywords = ["distress", "discomfort", "limping", "holding"]
+    
+    # NO INJURY indicators (severity 1-2)
+    no_injury_keywords = ["standing", "walking", "healthy", "smiling", "normal"]
+    
+    # DETERMINISTIC RULE-BASED SEVERITY ASSIGNMENT
+    severity_score = 2  # Default: stable
     confidence = 0.70
     injury_type = "Scene appears stable"
     
-    # Check for critical conditions
+    # Check keywords in priority order (most critical first)
     if any(keyword in caption_lower for keyword in critical_keywords):
-        injury_type = "Potential injury detected - person on ground"
-        severity_score = 7
+        severity_score = 9
+        confidence = 0.95
+        injury_type = "CRITICAL - Immediate life-threatening emergency"
+        logger.warning(f"🚨 CRITICAL condition detected: '{caption}'")
+    
+    elif any(keyword in caption_lower for keyword in severe_keywords):
+        severity_score = 8
+        confidence = 0.90
+        injury_type = "SEVERE - Person on ground, immediate response needed"
+        logger.warning(f"⚠️  SEVERE condition detected: '{caption}'")
+    
+    elif any(keyword in caption_lower for keyword in moderate_high_keywords):
+        severity_score = 6
         confidence = 0.85
-        logger.info(f"⚠️  Critical condition detected in caption: '{caption}'")
+        injury_type = "MODERATE-HIGH - Visible injury, medical attention required"
+        logger.info(f"⚠️  MODERATE-HIGH injury detected: '{caption}'")
+    
+    elif any(keyword in caption_lower for keyword in moderate_keywords):
+        severity_score = 5
+        confidence = 0.75
+        injury_type = "MODERATE - Minor injury, monitoring recommended"
+        logger.info(f"ℹ️  MODERATE injury detected: '{caption}'")
+    
+    elif any(keyword in caption_lower for keyword in low_keywords):
+        severity_score = 3
+        confidence = 0.70
+        injury_type = "LOW - Person in mild distress"
+        logger.info(f"ℹ️  LOW severity detected: '{caption}'")
+    
+    elif any(keyword in caption_lower for keyword in no_injury_keywords):
+        severity_score = 1
+        confidence = 0.80
+        injury_type = "MINIMAL - No visible emergency"
+        logger.info(f"✅ Stable scene detected: '{caption}'")
+    
     else:
+        # No keywords matched - default stable
+        severity_score = 2
+        confidence = 0.70
+        injury_type = "Scene appears stable - no critical indicators"
         logger.info(f"✅ No critical keywords in caption: '{caption}'")
     
-    # Boost confidence for uploaded images (assumed higher quality)
+    # Boost confidence for uploaded images (higher quality assumed)
     if source == "uploaded_image":
         confidence = min(0.99, confidence + 0.10)
         logger.info("📸 Boosting confidence for uploaded image")
@@ -300,7 +353,7 @@ def caption_to_triage(caption: str, mode: str = "AI", source: str = "live_video_
         "confidence": round(confidence, 2),
         "mode": mode,
         "source": source,
-        "caption": caption  # Include original caption for debugging
+        "caption": caption
     }
 
 
@@ -662,7 +715,15 @@ if __name__ == "__main__":
     logger.info(f"📦 AI Model: Salesforce/blip-image-captioning-base")
     logger.info(f"💻 Device: CPU (CUDA disabled)")
     logger.info(f"🎯 Mode: {AI_MODE}")
-    logger.info(f"🤖 Model Loaded: {image_to_text is not None}")
+    
+    # Clear model status
+    if AI_MODE == "AI":
+        logger.info(f"✅ BLIP Model: LOADED (Deterministic inference enabled)")
+        logger.info(f"🤖 Pipeline: {'READY' if image_to_text is not None else 'FAILED'}")
+    else:
+        logger.warning(f"⚠️  BLIP Model: NOT LOADED (Using SIMULATION fallback)")
+        logger.warning(f"⚠️  Analysis Mode: DETERMINISTIC SIMULATION (severity=5)")
+    
     logger.info(f"🏥 Patient Router: {PATIENT_ROUTER_AVAILABLE}")
     logger.info(f"⚛️  Quantum Optimizer: {QUANTUM_OPTIMIZER_AVAILABLE and OPTIMIZER_AVAILABLE}")
     logger.info(f"🌐 Server: http://0.0.0.0:8000")
