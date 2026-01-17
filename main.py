@@ -36,7 +36,6 @@ import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import httpx
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -442,20 +441,6 @@ async def dispatch(
         logger.info(f"   Injury: {injury}")
         logger.info(f"   Confidence: {analysis_result.get('confidence', 0)}")
         logger.info("=" * 70)
-        
-        # Auto-trigger max drone speed if severity > 5
-        if severity > 5:
-            logger.warning(f"🚨 HIGH SEVERITY DETECTED ({severity}/10) - Triggering MAX drone speed")
-            try:
-                async with httpx.AsyncClient(timeout=3.0) as client:
-                    response = await client.get("http://10.144.17.196:8000/max")
-                    if response.status_code == 200:
-                        logger.info(f"✅ Max drone speed activated successfully")
-                    else:
-                        logger.warning(f"⚠️ Max speed request returned status {response.status_code}")
-            except Exception as motor_error:
-                logger.error(f"❌ Failed to trigger max drone speed: {motor_error}")
-                # Don't fail the dispatch if motor control fails
         
         # Return combined response
         return {
