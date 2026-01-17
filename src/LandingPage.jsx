@@ -502,14 +502,14 @@ export default function LandingPage() {
 
         {/* SECTION 5 - EMERGENCY WORKFLOW - NEON FLOWCHART */}
         <section className="relative min-h-[140vh] flex items-center pointer-events-none">
-          <div className="max-w-7xl mx-auto px-6 w-full grid md:grid-cols-2 gap-12 items-center">
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-auto justify-center">
             {/* Left Content - NEON FLOWCHART */}
             <motion.div 
               initial={{ opacity: 0, x: -50 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: false, amount: 0.2 }}
               transition={{ duration: 0.8 }}
-              className="relative z-20 ml-[6vw] pointer-events-auto"
+              className="relative z-20 ml-[10vw] pointer-events-auto md:mr-[6vw]"
             >
               <div className="backdrop-blur-md bg-[rgba(10,10,20,0.75)] p-8 rounded-2xl border border-purple-500/20">
                 <h2 className="text-4xl md:text-5xl font-bold mb-4">
@@ -631,7 +631,7 @@ export default function LandingPage() {
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: false, amount: 0.3 }}
               transition={{ duration: 0.8 }}
-              className="relative z-20 mr-[8vw] pointer-events-auto"
+              className="relative z-20 mr-[-10vw] pointer-events-auto md:ml-[10vw]"
             >
               <div className="backdrop-blur-md bg-[rgba(10,10,20,0.75)] p-8 rounded-2xl border border-purple-500/20">
                 <h2 className="text-4xl md:text-5xl font-bold mb-6">
@@ -696,7 +696,7 @@ export default function LandingPage() {
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: false, amount: 0.3 }}
               transition={{ duration: 0.8 }}
-              className="relative z-20 ml-[6vw] pointer-events-auto"
+              className="relative z-20 ml-[-10vw] pointer-events-auto pr-48"
             >
               <div className="backdrop-blur-md bg-[rgba(10,10,20,0.75)] p-8 rounded-2xl border border-purple-500/20">
                 <h2 className="text-4xl md:text-5xl font-bold mb-6">
