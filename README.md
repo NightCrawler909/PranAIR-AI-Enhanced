@@ -4,6 +4,107 @@ A robust FastAPI backend for an AI-powered medical emergency drone system that c
 
 https://github.com/user-attachments/assets/878d6bbc-7811-4bf6-b5aa-72cc0fdf0c55
 
+🚁 PranAIR — AI-Enhanced Medical Emergency Drone System
+
+PranAIR is an intelligent, real-time medical emergency response platform that uses drones, live telemetry, interactive maps, and AI-assisted decision support to prioritize and reach patients faster during critical situations.
+
+The system simulates a next-generation emergency workflow where patient SOS signals, GPS locations, and severity levels are processed to help operators and doctors make informed, time-critical decisions.
+
+🌟 Key Features
+
+🚨 Patient SOS System
+One-tap SOS triggers live location capture and emergency workflows.
+
+🗺️ Multi-Patient Live Map View (Operator Dashboard)
+
+Real SOS patient + nearby patients using latitude/longitude
+
+Interactive maps with priority levels
+
+Blue navigation path between drone and patient (realistic routing)
+
+🧠 Severity-Based Priority Assignment
+Patients are ranked using medical severity + distance from drone to determine optimal dispatch order.
+
+📡 Live Drone Telemetry
+
+Battery percentage
+
+Altitude
+
+Status updates
+
+Continuous real-time streaming
+
+🎙️ Patient Voice Assistant (Gemini API)
+
+Converts speech → text
+
+Sends patient input to Gemini
+
+Responds with natural AI voice (no CUDA, no Whisper)
+
+🏥 Doctor’s View
+
+Focused medical insights
+
+Injury severity interpretation
+
+Clean UI without operator clutter
+
+📧 Automated Emergency Email Alerts
+
+Sends patient location & coordinates on SOS
+
+Designed to notify nearby hospitals and responders
+
+📐 Distance Calculation Method
+
+PranAIR uses the Haversine Formula to calculate the real-world surface distance between the drone and patients using GPS coordinates.
+This ensures accurate prioritization and realistic navigation over Earth’s curvature.
+
+🧱 Tech Stack
+
+Frontend
+
+React / Next.js
+
+Interactive Maps (Leaflet / Mapbox-style logic)
+
+Framer Motion animations
+
+Modern glassmorphism UI
+
+Backend
+
+FastAPI (Python)
+
+Gemini API for conversational AI
+
+Real-time telemetry simulation
+
+REST-based architecture
+
+CPU-only, lightweight, demo-friendly
+
+🎯 Project Vision
+
+PranAIR demonstrates how AI + drones + real-time geospatial intelligence can dramatically reduce emergency response time and improve decision-making in life-critical scenarios.
+
+This project is built for:
+
+Hackathons
+
+Research demos
+
+Smart city simulations
+
+Emergency response innovation
+
+⚠️ Note
+
+This project is a simulation and prototype intended for research, demonstration, and educational purposes.
+
 ## Features
 
 - **Visual Triage**: Uses Hugging Face's Qwen2-VL-7B-Instruct model to analyze emergency scenes
