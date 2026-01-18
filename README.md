@@ -2,6 +2,8 @@
 
 A robust FastAPI backend for an AI-powered medical emergency drone system that combines Hugging Face's vision AI with Google's Gemini for intelligent triage and hospital communication.
 
+https://github.com/user-attachments/assets/878d6bbc-7811-4bf6-b5aa-72cc0fdf0c55
+
 ## Features
 
 - **Visual Triage**: Uses Hugging Face's Qwen2-VL-7B-Instruct model to analyze emergency scenes
