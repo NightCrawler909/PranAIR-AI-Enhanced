@@ -4,7 +4,8 @@
 
 The system simulates a **next-generation emergency workflow** where patient SOS signals, GPS locations, and severity levels are processed to help operators and doctors make informed, time-critical decisions.
 
-https://github.com/user-attachments/assets/7439b3ae-7a12-4c6e-8da6-eb40e4139438
+[https://github.com/user-attachments/assets/7439b3ae-7a12-4c6e-8da6-eb40e4139438](https://github.com/user-attachments/assets/80d8c01e-b682-4c2e-8812-ac7e90b9254b)
+
 <img width="2225" height="1329" alt="image" src="https://github.com/user-attachments/assets/d03b1491-bee5-49b6-bd8c-12849180dac8" />
 <img width="2524" height="1355" alt="image" src="https://github.com/user-attachments/assets/1ca7acf7-4f83-4439-a18f-1f791fbad2da" />
 <img width="605" height="1040" alt="image" src="https://github.com/user-attachments/assets/f67c1c6d-473c-4633-bd6e-3f37595f867c" />
