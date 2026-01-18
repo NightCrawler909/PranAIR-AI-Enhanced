@@ -1,109 +1,120 @@
-# PranAIR - AI Medical Drone Backend
+<img width="2225" height="1329" alt="image" src="https://github.com/user-attachments/assets/d03b1491-bee5-49b6-bd8c-12849180dac8" /># 🚁 PranAIR — AI-Enhanced Medical Emergency Drone System
 
-A robust FastAPI backend for an AI-powered medical emergency drone system that combines Hugging Face's vision AI with Google's Gemini for intelligent triage and hospital communication.
+**PranAIR** is an intelligent, real-time medical emergency response platform that uses **drones, live telemetry, interactive maps, and AI-assisted decision support** to prioritize and reach patients faster during critical situations.
+
+The system simulates a **next-generation emergency workflow** where patient SOS signals, GPS locations, and severity levels are processed to help operators and doctors make informed, time-critical decisions.
 
 https://github.com/user-attachments/assets/878d6bbc-7811-4bf6-b5aa-72cc0fdf0c55
+<img width="2524" height="1355" alt="image" src="https://github.com/user-attachments/assets/1ca7acf7-4f83-4439-a18f-1f791fbad2da" />
+<img width="605" height="1040" alt="image" src="https://github.com/user-attachments/assets/f67c1c6d-473c-4633-bd6e-3f37595f867c" />
+<img width="679" height="1319" alt="image" src="https://github.com/user-attachments/assets/bb77ffac-10e6-4690-8173-e464dc3561e0" />
+<img width="2225" height="1329" alt="image" src="https://github.com/user-attachments/assets/aa48ba92-e396-42fb-a263-639fb7e1fe17" />
+<img width="2539" height="1345" alt="image" src="https://github.com/user-attachments/assets/888bbdc9-965e-4373-92d3-44267e181177" />
 
-🚁 PranAIR — AI-Enhanced Medical Emergency Drone System
+---
 
-PranAIR is an intelligent, real-time medical emergency response platform that uses drones, live telemetry, interactive maps, and AI-assisted decision support to prioritize and reach patients faster during critical situations.
+## 🌟 Key Features
 
-The system simulates a next-generation emergency workflow where patient SOS signals, GPS locations, and severity levels are processed to help operators and doctors make informed, time-critical decisions.
+### 🚨 Patient SOS System
+- One-tap SOS triggers emergency workflows  
+- Captures **live GPS location** instantly  
+- Initiates downstream medical & operator pipelines  
 
-🌟 Key Features
+---
 
-🚨 Patient SOS System
-One-tap SOS triggers live location capture and emergency workflows.
+### 🗺️ Multi-Patient Live Map View (Operator Dashboard)
+- Real SOS patient + nearby patients using **latitude & longitude**
+- **Interactive maps** with priority levels
+- **Blue navigation path** between drone and patient (Zomato-style routing)
+- Click-to-focus navigation for individual patients
 
-🗺️ Multi-Patient Live Map View (Operator Dashboard)
+---
 
-Real SOS patient + nearby patients using latitude/longitude
+### 🧠 Severity-Based Priority Assignment
+- Patients ranked using:
+  - Medical severity level
+  - Distance from drone
+- Determines **optimal dispatch order** automatically
 
-Interactive maps with priority levels
+---
 
-Blue navigation path between drone and patient (realistic routing)
+### 📡 Live Drone Telemetry
+- Battery percentage  
+- Altitude  
+- Drone status (idle, en route, airborne)  
+- Continuous **real-time streaming**
 
-🧠 Severity-Based Priority Assignment
-Patients are ranked using medical severity + distance from drone to determine optimal dispatch order.
+---
 
-📡 Live Drone Telemetry
+### 🎙️ Patient Voice Assistant (Gemini API)
+- Converts **speech → text**
+- Sends patient input to **Google Gemini**
+- Responds with **natural AI voice**
+- CPU-only pipeline (**no CUDA, no Whisper**)
 
-Battery percentage
+---
 
-Altitude
+### 🏥 Doctor’s View
+- Focused medical insights
+- Injury severity interpretation
+- Clean UI without operator clutter
+- Optimized for fast clinical decisions
 
-Status updates
+---
 
-Continuous real-time streaming
+### 📧 Automated Emergency Email Alerts
+- Sends patient **live location & coordinates** on SOS
+- Designed to notify:
+  - Nearby hospitals
+  - Emergency responders
+  - Control operators
 
-🎙️ Patient Voice Assistant (Gemini API)
+---
 
-Converts speech → text
+## 📐 Distance Calculation Method
 
-Sends patient input to Gemini
+PranAIR uses the **Haversine Formula** to calculate the real-world surface distance between the drone and patients using GPS coordinates.
 
-Responds with natural AI voice (no CUDA, no Whisper)
+This ensures:
+- Accurate distance estimation
+- Realistic navigation paths
+- Correct handling of Earth’s curvature
 
-🏥 Doctor’s View
+---
 
-Focused medical insights
+## 🧱 Tech Stack
 
-Injury severity interpretation
+### Frontend
+- **React / Next.js**
+- Interactive Maps (Leaflet / Mapbox-style logic)
+- **Framer Motion** animations
+- Modern **glassmorphism UI**
 
-Clean UI without operator clutter
+### Backend
+- **FastAPI (Python)**
+- **Gemini API** for conversational AI
+- Real-time telemetry simulation
+- REST-based architecture
+- **CPU-only**, lightweight, demo-friendly
 
-📧 Automated Emergency Email Alerts
+---
 
-Sends patient location & coordinates on SOS
+## 🎯 Project Vision
 
-Designed to notify nearby hospitals and responders
+PranAIR demonstrates how **AI + drones + real-time geospatial intelligence** can significantly reduce emergency response time and improve decision-making in life-critical scenarios.
 
-📐 Distance Calculation Method
+Built for:
+- Hackathons  
+- Research demos  
+- Smart city simulations  
+- Emergency response innovation  
 
-PranAIR uses the Haversine Formula to calculate the real-world surface distance between the drone and patients using GPS coordinates.
-This ensures accurate prioritization and realistic navigation over Earth’s curvature.
+---
 
-🧱 Tech Stack
+## ⚠️ Disclaimer
 
-Frontend
-
-React / Next.js
-
-Interactive Maps (Leaflet / Mapbox-style logic)
-
-Framer Motion animations
-
-Modern glassmorphism UI
-
-Backend
-
-FastAPI (Python)
-
-Gemini API for conversational AI
-
-Real-time telemetry simulation
-
-REST-based architecture
-
-CPU-only, lightweight, demo-friendly
-
-🎯 Project Vision
-
-PranAIR demonstrates how AI + drones + real-time geospatial intelligence can dramatically reduce emergency response time and improve decision-making in life-critical scenarios.
-
-This project is built for:
-
-Hackathons
-
-Research demos
-
-Smart city simulations
-
-Emergency response innovation
-
-⚠️ Note
-
-This project is a simulation and prototype intended for research, demonstration, and educational purposes.
+This project is a **simulation and prototype** intended for **research, demonstration, and educational purposes only**.  
+It is **not a production-ready medical or emergency response system**.
 
 ## Features
 
