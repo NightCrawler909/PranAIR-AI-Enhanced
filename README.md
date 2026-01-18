@@ -1,10 +1,11 @@
-<img width="2225" height="1329" alt="image" src="https://github.com/user-attachments/assets/d03b1491-bee5-49b6-bd8c-12849180dac8" /># 🚁 PranAIR — AI-Enhanced Medical Emergency Drone System
+# 🚁 PranAIR — AI-Enhanced Medical Emergency Drone System
 
 **PranAIR** is an intelligent, real-time medical emergency response platform that uses **drones, live telemetry, interactive maps, and AI-assisted decision support** to prioritize and reach patients faster during critical situations.
 
 The system simulates a **next-generation emergency workflow** where patient SOS signals, GPS locations, and severity levels are processed to help operators and doctors make informed, time-critical decisions.
 
-https://github.com/user-attachments/assets/878d6bbc-7811-4bf6-b5aa-72cc0fdf0c55
+https://github.com/user-attachments/assets/7439b3ae-7a12-4c6e-8da6-eb40e4139438
+<img width="2225" height="1329" alt="image" src="https://github.com/user-attachments/assets/d03b1491-bee5-49b6-bd8c-12849180dac8" />
 <img width="2524" height="1355" alt="image" src="https://github.com/user-attachments/assets/1ca7acf7-4f83-4439-a18f-1f791fbad2da" />
 <img width="605" height="1040" alt="image" src="https://github.com/user-attachments/assets/f67c1c6d-473c-4633-bd6e-3f37595f867c" />
 <img width="679" height="1319" alt="image" src="https://github.com/user-attachments/assets/bb77ffac-10e6-4690-8173-e464dc3561e0" />
